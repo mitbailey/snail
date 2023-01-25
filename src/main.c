@@ -10,6 +10,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <unistd.h>
 #include "gpiodev.h"
@@ -30,13 +31,85 @@ static char *modestr[] =
         "irq_both",
         "error    "};
 
-int main()
+int exec_file(const char * filename)
+{
+    int errcode = 0;
+    FILE* fp = fopen(filename, "r");
+    if (fp == NULL)
+    {
+        return -1;
+    }
+    char cmd[100];
+    int time[100];
+    char *line = NULL;
+    int lcount = 0;
+    size_t lsize = 0;
+    ssize_t rsize = 0;
+    while ((rsize = getline(&line, &lsize, fp)))
+    {
+        int count = 0;
+        char *tok = NULL;
+        char cmdc = 0;
+        int res = 0;
+        while ((tok = strtok(line, ",")))
+        {
+            count += 1; // counter increment
+            if (count > 2)
+            {
+                errcode = -4;
+                goto free_resource;
+            }
+            if (count == 1) // command
+            {
+                cmdc = tok[0];
+                if ((cmdc != 'H') || (cmdc != 'L') || (cmdc != 'W') || (cmdc != 'S'))
+                {
+                    errcode = -2;
+                    goto free_resource;
+                }
+            }
+            if (count == 2) // value
+            {
+                res = atoi(tok); // convert token to int
+                if ((res > 1000) || (res < 1))
+                {
+                    errcode = -3;
+                    goto free_resource;
+                }
+                break;
+            }
+        }
+        cmd[lcount] = cmdc;
+        time[lcount] = res;
+        lcount++;
+        free(line);
+        line = NULL;
+    }
+    for (int i = 0; i < lcount; i++)
+    {
+        char cmdc = cmd[i];
+        int val = time[i];
+    }
+free_resource:
+    if (line)
+        free(line);
+    return errcode;
+}
+
+int main(int argc, char **argv)
 {
     bprintlf("Single-actuator Non-ASIC Integrating Latching deformable mirror controller board software.");
     bprintlf("Copyright (c) 2023 Mit Bailey");
     bprintlf();
     bprintlf("WARNING: This program is designed to control a HIGH VOLTAGE printed circuit board. Attempts to set a GPIO pin to HIGH will prompt for a duration in milliseconds until the pin is automatically set to LOW, with a maximum duration of 1000 ms. User interaction will be denied during the countdown.");
     bprintlf();
+
+    if (argc > 2)
+    {
+        bprintlf("Usage:");
+        bprintlf("sudo %s [Command Filepath]", argv[0]);
+        exit(0);
+    }
 
     signal(SIGINT, &sig_handler); // set up signal handler
     int _idx = 1, idx = 976;
@@ -57,8 +130,15 @@ int main()
     }
 
     #define INBUFLEN 8
-    unsigned char inbuf[INBUFLEN] = {0};
+    char inbuf[INBUFLEN] = {0};
     char in = '\0';
+
+    if (argc == 2)
+    {
+        // exec_file(argv[1]);
+        // exit(0);
+        // TODO: exec file (not implemented)
+    }
 
     while (!done)
     {
@@ -87,7 +167,7 @@ int main()
         case 's': // Select GPIO
         case 'S':
             bprintf("Enter GPIO pin number: ");
-            unsigned char idxbuf[INBUFLEN] = {0};
+            char idxbuf[INBUFLEN] = {0};
             memset(idxbuf, 0x0, sizeof(idxbuf));
             if (fgets(idxbuf, sizeof(idxbuf), stdin)) {
                 if (1 != sscanf(idxbuf, "%d", &idx)) {
@@ -123,7 +203,7 @@ int main()
         case 'H':
             bprintlf("A duration is required for this action.");
             bprintf("Enter duration in ms (max 1000): ");
-            unsigned char dinbuf[INBUFLEN] = {0};
+            char dinbuf[INBUFLEN] = {0};
             memset(dinbuf, 0x0, sizeof(inbuf));
             int duration = 0;
             if (fgets(dinbuf, sizeof(dinbuf), stdin)) {
@@ -131,6 +211,11 @@ int main()
                     // in is unsafe
                     continue;
                 }
+            }
+
+            if (duration > 1000)
+            {
+                duration = 1000;
             }
 
             bprintlf("Pulling pin %d HIGH for a duration of %d ms.", idx, duration);
